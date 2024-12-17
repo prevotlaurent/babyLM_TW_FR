@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description='')
 parser.add_argument('-language', action="store", dest="language", default = None, type=str)
 parser.add_argument('-corpus_name', action="store", dest="corpus_name", default = None, type=str)
 parser.add_argument('-tok_name', action="store", dest="tok_name", default = 'spbpe', type=str)
-parser.add_argument('-tok_type', action="store", dest="tok_type", default = 'unigram', type=bool)
+parser.add_argument('-tok_type', action="store", dest="tok_type", default = 'unigram', type=str)
 
 
 parser.add_argument('-epoch', action="store", dest="epoch", default = 100, type=int)
