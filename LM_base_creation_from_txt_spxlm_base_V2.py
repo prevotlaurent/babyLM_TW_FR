@@ -25,29 +25,45 @@ from transformers import AutoTokenizer
 
 from datasets import load_dataset
 
+def boolean_string(s):
+    if s not in {'False', 'True'}:
+        raise ValueError('Not a valid boolean string')
+    return s == 'True'
 
 parser = argparse.ArgumentParser(description='')
+parser.add_argument('-exp_tag', action="store", dest="exp_tag", default = '', type=str)
 parser.add_argument('-language', action="store", dest="language", default = None, type=str)
 parser.add_argument('-corpus_name', action="store", dest="corpus_name", default = None, type=str)
-parser.add_argument('-tok_name', action="store", dest="tok_name", default = 'spbpe', type=str)
+parser.add_argument('-tok_name', action="store", dest="tok_name", default = 'sp', type=str)
 parser.add_argument('-tok_type', action="store", dest="tok_type", default = 'unigram', type=str)
 
+parser.add_argument('-save_total_limit', action="store", dest="save_total_limit", default = 1, type=int)
+parser.add_argument('-use_valid_data', action="store", dest="use_valid_data", default = True, type=boolean_string)
 
-parser.add_argument('-epoch', action="store", dest="epoch", default = 100, type=int)
+parser.add_argument('-epoch', action="store", dest="epoch", default = 50, type=int)
 parser.add_argument('-batch_size', action="store", dest="batch_size", default = 32, type=int)
 parser.add_argument('-vocab_size', action="store", dest="vocab_size", default = 10000, type=int)
 parser.add_argument('-model_path', action="store", dest="model_path", default = "./models/", type=str)
 parser.add_argument('-patience', action="store", dest="patience", default = 10, type=int)
 parser.add_argument('-learning_rate', action="store", dest="learning_rate", default = 1e-4, type=float)
-parser.add_argument('-group_texts', action="store", dest="group_texts", default = False, type=bool)
+parser.add_argument('-group_texts', action="store", dest="group_texts", default = False, type=boolean_string)
 
 
 arguments = parser.parse_args()
+
+if arguments.exp_tag != '':
+    p_exp_tag = '_' + arguments.exp_tag
+else:
+    p_exp_tag = ''
+    
+p_use_valid_data = arguments.use_valid_data
+print(p_use_valid_data)
 
 p_language = arguments.language
 p_corpus_name = arguments.corpus_name
 p_tok_name = arguments.tok_name
 p_tok_type = arguments.tok_type
+p_save_total_limit = arguments.save_total_limit
 p_epoch = arguments.epoch
 p_vocab_size = arguments.vocab_size
 p_batch_size = arguments.batch_size
@@ -56,7 +72,7 @@ p_patience = arguments.patience
 p_learning_rate = arguments.learning_rate
 p_group_texts = arguments.group_texts
 
-p_model_name =  p_language + '_'+ p_corpus_name + '_'+p_tok_name
+p_model_name =  p_language + '_'+ p_corpus_name + '_'+p_tok_name +  p_exp_tag
 p_save_path = p_model_path + p_model_name
 
 if not os.path.exists(p_save_path):
@@ -140,7 +156,11 @@ model.to(device)
 tokenizer = AutoTokenizer.from_pretrained(p_save_path,max_len=512,clean_up_tokenization_spaces = False)
 
 # Dataset
-dataset = load_dataset("text", data_files={"train": [train_path], "valid": [valid_path]})
+if p_use_valid_data:
+    dataset = load_dataset("text", data_files={"train": [train_path], "valid": [valid_path]})
+else:
+    dataset = load_dataset("text", data_files={"train": [train_path]})
+    
 
 # Create Data collator
 data_collator = DataCollatorForLanguageModeling(
@@ -191,12 +211,13 @@ if p_group_texts :
         remove_columns=['text'],
         load_from_cache_file=False,
     )
-    tokenized_valid = dataset['valid'].map(
-        tokenize_function_concat,
-        batched=True,
-        remove_columns=['text'],
-        load_from_cache_file=False,
-    )
+    if p_use_valid_data:
+        tokenized_valid = dataset['valid'].map(
+            tokenize_function_concat,
+            batched=True,
+            remove_columns=['text'],
+            load_from_cache_file=False,
+        )
 
     tokenized_train = tokenized_train.map(
         group_texts,
@@ -205,14 +226,15 @@ if p_group_texts :
         num_proc=4,
         load_from_cache_file=False,
     )
-
-    tokenized_valid = tokenized_valid.map(
-        group_texts,
-        batched=True,
-        batch_size=1000,
-        num_proc=4,
-        load_from_cache_file=False,
-    )
+    
+    if p_use_valid_data:
+        tokenized_valid = tokenized_valid.map(
+            group_texts,
+            batched=True,
+            batch_size=1000,
+            num_proc=4,
+            load_from_cache_file=False,
+        )
 
 
 
@@ -225,38 +247,65 @@ else:
         remove_columns=['text'],
         load_from_cache_file=False,
     )
-    tokenized_valid = dataset['valid'].map(
-        tokenize_function_base,
-        batched=True,
-        remove_columns=['text'],
-        load_from_cache_file=False,
+    
+    if p_use_valid_data:
+        tokenized_valid = dataset['valid'].map(
+            tokenize_function_base,
+            batched=True,
+            remove_columns=['text'],
+            load_from_cache_file=False,
+        )
+
+
+
+if p_use_valid_data:
+
+    training_args = TrainingArguments(
+        output_dir=p_save_path,
+        overwrite_output_dir=True,
+        num_train_epochs=p_epoch,
+        per_device_train_batch_size=p_batch_size,
+        per_device_eval_batch_size=p_batch_size,  # evaluation batch size
+        load_best_model_at_end=True,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        logging_strategy="epoch",
+        save_total_limit=p_save_total_limit,
+        prediction_loss_only=True,
+        save_only_model=True,
+        learning_rate=p_learning_rate,
     )
 
-training_args = TrainingArguments(
-    output_dir=p_save_path,
-    overwrite_output_dir=True,
-    num_train_epochs=p_epoch,
-    per_device_train_batch_size=p_batch_size,
-    per_device_eval_batch_size=p_batch_size,  # evaluation batch size
-    load_best_model_at_end=True,
-    evaluation_strategy="epoch",
-    save_strategy="epoch",
-    logging_strategy="epoch",
-    save_total_limit=1,
-    prediction_loss_only=True,
-    save_only_model=True,
-    learning_rate=p_learning_rate,
-)
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=tokenized_train,
+        eval_dataset=tokenized_valid,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=p_patience)]
+    )
 
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    data_collator=data_collator,
-    train_dataset=tokenized_train,
-    eval_dataset=tokenized_valid,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=p_patience)]
+else:
+    training_args = TrainingArguments(
+        output_dir=p_save_path,
+        overwrite_output_dir=True,
+        num_train_epochs=p_epoch,
+        per_device_train_batch_size=p_batch_size,
+        evaluation_strategy="no",
+        save_strategy="epoch",
+        logging_strategy="epoch",
+        save_total_limit=p_save_total_limit,
+        prediction_loss_only=True,
+        save_only_model=True,
+        learning_rate=p_learning_rate,
+    )
 
-)
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        data_collator=data_collator,
+        train_dataset=tokenized_train,
+    )    
 
 
 ###############################

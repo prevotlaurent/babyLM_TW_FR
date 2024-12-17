@@ -35,6 +35,11 @@ import re
 
 import argparse
 
+def boolean_string(s):
+    if s not in {'False', 'True'}:
+        raise ValueError('Not a valid boolean string')
+    return s == 'True'
+
 parser = argparse.ArgumentParser(description='')
 
 
@@ -48,12 +53,15 @@ parser.add_argument('-label_column', action="store", dest="label_column",default
 parser.add_argument('-tok_column', action="store", dest="tok_column",default = 'tok',type=str)
 parser.add_argument('-spk_column', action="store", dest="spk_column",default = 'speaker',type=str)
 
+parser.add_argument('-exp_tag', action="store", dest="exp_tag", default = '', type=str)
 parser.add_argument('-ckpt', action="store", dest="ckpt", default = "", type=str)
 
 parser.add_argument('-run_only', action="store", dest="run_only", default = 0, type=int)
-parser.add_argument('-compact', action="store", dest="compact", default = True, type=bool)
+parser.add_argument('-compact', action="store", dest="compact", default = True, type=boolean_string)
 
 parser.add_argument('-ft_eps', action="store", dest="ft_eps", default = 10, type=int)
+parser.add_argument('-patience', action="store", dest="patience", default = 3, type=int)
+
 parser.add_argument('-batch_size', action="store", dest="batch_size", default = 16, type=int)
 parser.add_argument('-max_length', action="store", dest="max_length", default = 128, type=int)
 parser.add_argument('-lr', action="store", dest="lr", default = 2e-5, type=float)
@@ -69,6 +77,12 @@ for FOLDER in [RESULT_FOLDER, FIGS_FOLDER, MODELS_FOLDER]:
 
 args = parser.parse_args()
 
+if args.exp_tag != '':
+    exp_tag = '_' + args.exp_tag
+else:
+    exp_tag = ''
+    
+
 task = args.task
 lge = args.lge
 corpus = args.corpus
@@ -76,6 +90,7 @@ benchmark_file = args.benchmark_file
 benchmark_sep = args.benchmark_sep
 label_column = args.label_column
 tok_column = args.tok_column
+
 #overall_name = 'test'
 
 run_only = args.run_only
@@ -83,6 +98,7 @@ compact = args.compact
 
 checkpoint = args.ckpt
 ft_eps = args.ft_eps
+patience = args.patience
 batch_size = args.batch_size
 max_length = args.max_length
 lr = args.lr
@@ -93,7 +109,7 @@ def normalize_tokens(row):
     tmp_tok = tmp_tok.replace("'",'').replace('=','').replace('_','').replace('-','').replace('@@','*').replace('@','*').replace('#',",").replace('dummy',",")
     return tmp_tok
 
-tokenizer = PreTrainedTokenizerFast.from_pretrained(checkpoint,max_len=max_length,add_prefix_space=True)
+tokenizer = AutoTokenizer.from_pretrained(checkpoint,max_len=max_length,add_prefix_space=True)
 
 if corpus == 'cid':
 	FOLDS = {1:['AB','CM'],2:['YM','AG'],3:['EB','SR'],4:['LL','NH'],
@@ -308,7 +324,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
     
     #model.to('cuda')                                      #####
     
-    model_name = re.sub("(\./|/)", "_", checkpoint) +'-'+ str(fold)
+    model_name = re.sub("(\./|/)", "_", checkpoint + exp_tag) +'-'+ str(fold)
         
     print(model_name)
    
@@ -337,7 +353,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         trainer = CustomTrainer(model,args,
                           tokenized_split_dataset["train"],tokenized_split_dataset["valid"],
                           data_collator,tokenizer,compute_metrics=compute_metric,
-                          callbacks = [EarlyStoppingCallback(early_stopping_patience=3)]
+                          callbacks = [EarlyStoppingCallback(early_stopping_patience=patience)]
                           )
 
     else:
@@ -345,7 +361,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
                           train_dataset=tokenized_split_dataset["train"],
                           eval_dataset=tokenized_split_dataset["valid"],
                           data_collator=data_collator,tokenizer=tokenizer,compute_metrics=compute_metric,
-                          callbacks = [EarlyStoppingCallback(early_stopping_patience=3)]
+                          callbacks = [EarlyStoppingCallback(early_stopping_patience=patience)]
                           ) 
         
     print(args)
@@ -365,10 +381,13 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         ]
     
     if error_analysis:
+        EXP_FOLDER = RESULT_FOLDER + '/error_analysis_' + task+"_"+ re.sub("(\./|/)", "_", checkpoint + exp_tag) + '/'
+        if not os.path.exists(EXP_FOLDER):
+            os.makedirs(EXP_FOLDER)
         EA_df = pd.DataFrame(tokenized_split_dataset["test"])
         EA_df['predict'] = true_predictions
         EA_df['gold'] = true_labels
-        EA_df.to_csv(RESULT_FOLDER+"error_analysis_"+task+"_"+model_name+'.csv')
+        EA_df.to_csv(EXP_FOLDER+"error_analysis_"+task+"_"+model_name+'.csv')
 
     if not keep_models:
         shutil.rmtree(MODELS_FOLDER+model_name+"-finetuned-"+task)
@@ -404,7 +423,7 @@ def run_complete_expe(expe_name,ds,label_list,weighted=False):
     print(expe_name)
     print('====')    
        
-    m_name = re.sub("(\./|/)", "_", checkpoint)
+    m_name = re.sub("(\./|/)", "_", checkpoint + exp_tag)
     print('running ' + str(m_name))
     res_cv = run_crossvalid(expe_name,ds,checkpoint,label_list,
                                 weighted=weighted,verbose=False,error_analysis=True,keep_models=False)
