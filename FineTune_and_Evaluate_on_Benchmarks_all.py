@@ -9,7 +9,7 @@ import collections
 
 import datasets
 from datasets import Dataset, Value, ClassLabel, Features
-from datasets import load_metric
+from evaluate import load
 
 import torch
 from torch import nn
@@ -26,7 +26,7 @@ from transformers import Trainer
 from transformers import EarlyStoppingCallback
 
 
-import seaborn as sns
+#import seaborn as sns
 
 import shutil
 
@@ -34,6 +34,8 @@ import os
 import re
 
 import argparse
+
+import sentencepiece as spm
 
 def boolean_string(s):
     if s not in {'False', 'True'}:
@@ -58,24 +60,38 @@ parser.add_argument('-ckpt', action="store", dest="ckpt", default = "", type=str
 
 parser.add_argument('-run_only', action="store", dest="run_only", default = 0, type=int)
 parser.add_argument('-compact', action="store", dest="compact", default = True, type=boolean_string)
+parser.add_argument('-voc_prune', action="store", dest="voc_prune", default = True, type=boolean_string)
 
 parser.add_argument('-ft_eps', action="store", dest="ft_eps", default = 10, type=int)
 parser.add_argument('-patience', action="store", dest="patience", default = 3, type=int)
 
-parser.add_argument('-batch_size', action="store", dest="batch_size", default = 16, type=int)
+parser.add_argument('-prom_cutoff', action="store", dest="prom_cutoff", default = 1.25, type=float)
+parser.add_argument('-red_cutoff', action="store", dest="red_cutoff", default = 0.75, type=float)
+
+
+parser.add_argument('-batch_size', action="store", dest="batch_size", default = 32, type=int)
 parser.add_argument('-max_length', action="store", dest="max_length", default = 128, type=int)
 parser.add_argument('-lr', action="store", dest="lr", default = 2e-5, type=float)
 
-RESULT_FOLDER ="./results/"
-MODELS_FOLDER ="./models/"
-FIGS_FOLDER ="./figs/"
-
-for FOLDER in [RESULT_FOLDER, FIGS_FOLDER, MODELS_FOLDER]:
-    if not os.path.exists(FOLDER):
-        os.makedirs(FOLDER)
+parser.add_argument('-freeze_to', action="store", dest="freeze_to", default = 0.0, type=float)
+parser.add_argument('-results_dir', action="store", dest="results_dir", default = "./results/", type=str)
+parser.add_argument('-models_dir', action="store", dest="models_dir", default = "./models_ft/", type=str)
+parser.add_argument('-figs_dir', action="store", dest="figs_dir", default = "./figs/", type=str)
 
 
 args = parser.parse_args()
+
+RESULT_FOLDER = args.results_dir
+MODELS_FOLDER = args.models_dir
+FIGS_FOLDER = args.figs_dir
+LOGS_FOLDER = re.sub("/$", "_logs/", args.results_dir)
+
+
+for FOLDER in [RESULT_FOLDER, FIGS_FOLDER, MODELS_FOLDER, LOGS_FOLDER]:
+    if not os.path.exists(FOLDER):
+        os.makedirs(FOLDER)
+        
+ 
 
 if args.exp_tag != '':
     exp_tag = '_' + args.exp_tag
@@ -91,6 +107,11 @@ benchmark_sep = args.benchmark_sep
 label_column = args.label_column
 tok_column = args.tok_column
 
+prom_cutoff = args.prom_cutoff
+red_cutoff = args.red_cutoff
+
+freeze_to = args.freeze_to
+
 #overall_name = 'test'
 
 run_only = args.run_only
@@ -102,6 +123,7 @@ patience = args.patience
 batch_size = args.batch_size
 max_length = args.max_length
 lr = args.lr
+voc_prune = args.voc_prune
 
 
 def normalize_tokens(row):
@@ -109,21 +131,32 @@ def normalize_tokens(row):
     tmp_tok = tmp_tok.replace("'",'').replace('=','').replace('_','').replace('-','').replace('@@','*').replace('@','*').replace('#',",").replace('dummy',",")
     return tmp_tok
 
+print("load tokenizer")
 tokenizer = AutoTokenizer.from_pretrained(checkpoint,max_len=max_length,add_prefix_space=True)
 
 if corpus == 'cid':
 	FOLDS = {1:['AB','CM'],2:['YM','AG'],3:['EB','SR'],4:['LL','NH'],
 		     5:['BX','MG'],6:['AP','LJ'],7:['IM','ML'],8:['MB','AC']}
 elif corpus == 'buckeye':
-	FOLDS = {1:['s01', 's02', 's06', 's03'], 2:['s04', 's05', 's11', 's10'], 3:['s08', 's07', 's13', 's19'],
-		 4:['s09', 's14', 's15', 's22'], 5:['s12', 's16', 's28', 's23'], 6:['s21', 's17', 's30', 's24'],
-		 7:['s26', 's18', 's32', 's29'], 8:['s31', 's20', 's33', 's35'], 9:['s37', 's25', 's34', 's36'],
-		 10:['s39', 's27', 's40', 's38']}
-		 
+	#FOLDS = {1:['s01', 's02', 's06', 's03'], 2:['s04', 's05', 's11', 's10'], 3:['s08', 's07', 's13', 's19'],
+	#	 4:['s09', 's14', 's15', 's22'], 5:['s12', 's16', 's28', 's23'], 6:['s21', 's17', 's30', 's24'],
+	#	 7:['s26', 's18', 's32', 's29'], 8:['s31', 's20', 's33', 's35'], 9:['s37', 's25', 's34', 's36'],
+	#	 10:['s39', 's27', 's40', 's38']} 
+	FOLDS = {1:['s01', 's02', 's06', 's03', 's37'], 2:['s04', 's05', 's11', 's10', 's25'], 
+             3:['s08', 's07', 's13', 's19', 's34'], 4:['s09', 's14', 's15', 's22', 's36'],
+             5:['s12', 's16', 's28', 's23', 's39'], 6:['s21', 's17', 's30', 's24', 's27'], 
+             7:['s26', 's18', 's32', 's29', 's40'], 8:['s31', 's20', 's33', 's35', 's38']}         
+elif corpus == 'mcdc':
+	FOLDS = {1:['MCDC_01'], 2:['MCDC_02'], 3:['MCDC_03'],
+		 4:['MCDC_05'], 5:['MCDC_09'], 6:['MCDC_10'],
+		 7:['MCDC_25'], 8:['MCDC_26']}		 
+         
 NB_FOLDS = len(FOLDS.keys())    
 
-metric = load_metric("seqeval")
+print("load metric")
+metric = load("./seqeval")
 
+print("load read_csv")
 df = pd.read_csv(benchmark_file, sep = benchmark_sep)
 
 df[tok_column] = df[tok_column].fillna(',')
@@ -131,9 +164,9 @@ df[tok_column] = df.apply(normalize_tokens,axis=1)
 #df['duration'] = df['end']-df['start']
 
 if label_column == "prom":
-    df['label'] = df[label_column]>1.25
+    df['label'] = df[label_column]>prom_cutoff
 elif label_column == "red":
-    df['label'] = df[label_column]<0.75
+    df['label'] = df[label_column]<red_cutoff
 elif label_column == "bc":
     df['label'] = df[label_column]
 
@@ -142,6 +175,7 @@ def addfold(spk,folds):
         if spk in folds[fold]:
             return fold
 
+print("load fold")
 df['fold'] = df.apply(lambda row: addfold(row['speaker'], FOLDS), axis=1)
 
 
@@ -181,7 +215,9 @@ def token2sent(df,threshold=0.5):
     output['labels'] = output["labels"].apply(lambda lst: [0] + lst + [0])
     return output
 
+print("token2sent")
 df_ready = token2sent(df)
+
 
 def compact(df):
 
@@ -203,6 +239,7 @@ def compact(df):
 
     return pd.DataFrame(res,columns=[tok_column,'labels','fold'])
 
+print("compact")
 
 if compact:
     df_ready = compact(df_ready)
@@ -238,7 +275,7 @@ def get_label_list(labels):
     return label_list
 
 
-
+print("dataset processing")
 dataset = Dataset.from_pandas(df_ready)
 dataset = dataset.map(lambda ex: {"tags": ex["labels_bio"]}) #red_bio
 all_labels = get_label_list(dataset["tags"])
@@ -314,8 +351,31 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
     print(fold)
  
     tokenized_split_dataset = split_dataset.map(lambda d : tokenize_and_align_labels(d,tokenizer), batched=True)
- 
+
+    print("start run_complete_expe")
+
     model = AutoModelForTokenClassification.from_pretrained(checkpoint, num_labels=len(label_list), trust_remote_code=True)
+
+    model_name = re.sub("(\./|/)", "_", checkpoint + exp_tag) +'-'+ str(fold)
+        
+    print(model_name)
+             
+    #layer freezing code goes here
+    if freeze_to > 0.0:        
+
+        for name, param in model.named_parameters():
+            if 'embeddings' in name:
+                param.requires_grad = False
+                print(name)  
+    
+        freeze_to_layer = int(round(model.config.num_hidden_layers*freeze_to))
+        freeze_to_layer   
+        
+        for layer in range(0,freeze_to_layer):
+            for name, param in model.named_parameters():
+                if 'encoder.layer.' + str(layer) + '.' in name:
+                    param.requires_grad = False
+                    print(name)
          
     if verbose:
         print(model)
@@ -324,9 +384,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
     
     #model.to('cuda')                                      #####
     
-    model_name = re.sub("(\./|/)", "_", checkpoint + exp_tag) +'-'+ str(fold)
-        
-    print(model_name)
+
    
     args = TrainingArguments(
         MODELS_FOLDER+model_name+"-finetuned-"+task,
@@ -339,6 +397,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         per_device_eval_batch_size=batch_size,
         num_train_epochs=ft_eps,
         weight_decay=0.01,
+        save_total_limit=1,
         load_best_model_at_end=True,
         metric_for_best_model = 'f1',
         greater_is_better =True
@@ -381,7 +440,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         ]
     
     if error_analysis:
-        EXP_FOLDER = RESULT_FOLDER + '/error_analysis_' + task+"_"+ re.sub("(\./|/)", "_", checkpoint + exp_tag) + '/'
+        EXP_FOLDER = LOGS_FOLDER + '/error_analysis_' + task+"_"+ re.sub("(\./|/)", "_", checkpoint + exp_tag) + '/'
         if not os.path.exists(EXP_FOLDER):
             os.makedirs(EXP_FOLDER)
         EA_df = pd.DataFrame(tokenized_split_dataset["test"])
@@ -435,7 +494,9 @@ def run_complete_expe(expe_name,ds,label_list,weighted=False):
 
     
     return 0
-    
+
+print("start run_complete_expe")
+
 run_complete_expe(args.lge+'_'+args.task,dataset,label_list)
 
 
