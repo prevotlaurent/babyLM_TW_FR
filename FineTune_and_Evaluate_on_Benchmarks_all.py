@@ -283,8 +283,13 @@ dataset = dataset.cast_column("tags", datasets.Sequence(datasets.ClassLabel(name
 label_list = dataset.features["tags"].feature.names
 
 def tokenize_and_align_labels(examples,tokenizer):
+
+    tokenized_inputs = tokenizer(examples[tok_column], padding='max_length', truncation=True, is_split_into_words=True, add_special_tokens = False, max_length = max_length)
     
-    tokenized_inputs = tokenizer(examples[tok_column], padding='max_length', truncation=True, is_split_into_words=True, add_special_tokens = False, max_length = max_length)        
+    tokenized_inputs['input_tokens'] = []
+    for i in range(len(tokenized_inputs.input_ids)):
+        tokens = [x for x in tokenizer.convert_ids_to_tokens(tokenized_inputs.input_ids[i]) if x not in tokenizer.all_special_tokens]
+        tokenized_inputs['input_tokens'].append(tokens)  
 
     labels = []
     
@@ -446,7 +451,16 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         EA_df = pd.DataFrame(tokenized_split_dataset["test"])
         EA_df['predict'] = true_predictions
         EA_df['gold'] = true_labels
-        EA_df.to_csv(EXP_FOLDER+"error_analysis_"+task+"_"+model_name+'.csv')
+        #EA_df.to_csv(EXP_FOLDER+"error_analysis_"+task+"_"+model_name+'.csv')
+        EA_df.to_csv(EXP_FOLDER+"complex_EA_"+str(fold)+'.csv')    
+        
+        tokens_col = [item for row in EA_df['input_tokens'] for item in row]
+        predict_col = [item for row in EA_df['predict'] for item in row]
+        gold_col = [item for row in EA_df['gold'] for item in row]
+        EA_df = pd.DataFrame(list(zip(tokens_col, predict_col, gold_col)),
+                       columns =['token', 'prediction', 'gold'])        
+        EA_df.to_csv(EXP_FOLDER+'simple_EA_'+str(fold)+'.csv')
+        
 
     if not keep_models:
         shutil.rmtree(MODELS_FOLDER+model_name+"-finetuned-"+task)
