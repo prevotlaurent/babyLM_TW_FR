@@ -43,6 +43,10 @@ parser.add_argument('-use_valid_data', action="store", dest="use_valid_data", de
 parser.add_argument('-epoch', action="store", dest="epoch", default = 50, type=int)
 parser.add_argument('-batch_size', action="store", dest="batch_size", default = 32, type=int)
 parser.add_argument('-vocab_size', action="store", dest="vocab_size", default = 10000, type=int)
+
+parser.add_argument('-num_hidden_layers', action="store", dest="num_hidden_layers", default = 6, type=int)
+parser.add_argument('-warmup_ratio', action="store", dest="warmup_ratio", default = 0.0, type=float)
+
 parser.add_argument('-model_path', action="store", dest="model_path", default = "./models/", type=str)
 parser.add_argument('-patience', action="store", dest="patience", default = 10, type=int)
 parser.add_argument('-learning_rate', action="store", dest="learning_rate", default = 1e-4, type=float)
@@ -59,6 +63,7 @@ else:
 p_use_valid_data = arguments.use_valid_data
 print(p_use_valid_data)
 
+p_num_hidden_layers = arguments.num_hidden_layers
 p_language = arguments.language
 p_corpus_name = arguments.corpus_name
 p_tok_name = arguments.tok_name
@@ -70,6 +75,7 @@ p_batch_size = arguments.batch_size
 p_model_path = arguments.model_path
 p_patience = arguments.patience
 p_learning_rate = arguments.learning_rate
+p_warmup_ratio = arguments.warmup_ratio 
 p_group_texts = arguments.group_texts
 
 p_model_name =  p_language + '_'+ p_corpus_name + '_'+p_tok_name +  p_exp_tag
@@ -143,7 +149,7 @@ config = XLMRobertaConfig(
     vocab_size=tokenizer.vocab_size,
     max_position_embeddings=514,
     num_attention_heads=12,
-    num_hidden_layers=6,
+    num_hidden_layers=p_num_hidden_layers,
     type_vocab_size=1,
 )
 
@@ -274,6 +280,7 @@ if p_use_valid_data:
         prediction_loss_only=True,
         save_only_model=True,
         learning_rate=p_learning_rate,
+        warmup_ratio = p_warmup_ratio,
     )
 
     trainer = Trainer(
@@ -298,6 +305,7 @@ else:
         prediction_loss_only=True,
         save_only_model=True,
         learning_rate=p_learning_rate,
+        warmup_ratio = p_warmup_ratio,
     )
 
     trainer = Trainer(
