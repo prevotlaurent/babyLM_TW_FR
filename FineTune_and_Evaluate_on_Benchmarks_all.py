@@ -87,6 +87,8 @@ FIGS_FOLDER = args.figs_dir
 LOGS_FOLDER = re.sub("/$", "_logs/", args.results_dir)
 
 
+
+
 for FOLDER in [RESULT_FOLDER, FIGS_FOLDER, MODELS_FOLDER, LOGS_FOLDER]:
     if not os.path.exists(FOLDER):
         os.makedirs(FOLDER)
@@ -133,6 +135,7 @@ def normalize_tokens(row):
 
 print("load tokenizer")
 tokenizer = AutoTokenizer.from_pretrained(checkpoint,max_len=max_length,add_prefix_space=True)
+
 
 if corpus == 'cid':
 	FOLDS = {1:['AB','CM'],2:['YM','AG'],3:['EB','SR'],4:['LL','NH'],
@@ -430,6 +433,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         
     print(args)
     trainer.train()
+    trainer.save_state()
     
     predictions, labels, _ = trainer.predict(tokenized_split_dataset["test"])
     predictions = np.argmax(predictions, axis=2)
@@ -463,6 +467,7 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
         
 
     if not keep_models:
+        shutil.move(MODELS_FOLDER+model_name+"-finetuned-"+task+'/trainer_state.json', EXP_FOLDER+'trainer_state_'+str(fold)+'.json')
         shutil.rmtree(MODELS_FOLDER+model_name+"-finetuned-"+task)
     
     return metric.compute(predictions=true_predictions, references=true_labels)
