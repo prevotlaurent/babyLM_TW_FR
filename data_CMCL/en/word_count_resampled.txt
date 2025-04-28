@@ -1,0 +1,9 @@
+ /srilm
+$ ls | grep sample | xargs wc -w
+   870875 allbaby_dev_sample.txt
+  9104036 allbaby_train_sample.txt
+   873516 spoken_dev_sample.txt
+  9102750 spoken_train_sample.txt
+   878772 wiki_dev_sample.txt
+  9102480 wiki_train_sample.txt
+ 29932429 total
