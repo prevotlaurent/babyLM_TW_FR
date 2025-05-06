@@ -40,16 +40,24 @@ parser.add_argument('-tok_type', action="store", dest="tok_type", default = 'uni
 parser.add_argument('-save_total_limit', action="store", dest="save_total_limit", default = 1, type=int)
 parser.add_argument('-use_valid_data', action="store", dest="use_valid_data", default = True, type=boolean_string)
 
-parser.add_argument('-epoch', action="store", dest="epoch", default = 50, type=int)
+parser.add_argument('-epoch', action="store", dest="epoch", default = 128, type=int)
 parser.add_argument('-batch_size', action="store", dest="batch_size", default = 32, type=int)
 parser.add_argument('-vocab_size', action="store", dest="vocab_size", default = 10000, type=int)
 
-parser.add_argument('-num_hidden_layers', action="store", dest="num_hidden_layers", default = 6, type=int)
-parser.add_argument('-warmup_ratio', action="store", dest="warmup_ratio", default = 0.0, type=float)
+parser.add_argument('-hidden_size', action="store", dest="hidden_size", default = 512, type=int)
+parser.add_argument('-num_hidden_layers', action="store", dest="num_hidden_layers", default = 4, type=int)
+parser.add_argument('-num_attention_heads', action="store", dest="num_attention_heads", default = 8, type=int)
+parser.add_argument('-intermediate_size', action="store", dest="intermediate_size", default = 2048, type=int)
+parser.add_argument('-hidden_dropout_prob', action="store", dest="hidden_dropout_prob", default = 0.1, type=float)
+parser.add_argument('-attention_probs_dropout_prob', action="store", dest="attention_probs_dropout_prob", default = 0.1, type=float)
 
-parser.add_argument('-model_path', action="store", dest="model_path", default = "./models/", type=str)
+parser.add_argument('-text_path', action="store", dest="text_path", default = "./data_cleaned_txt/", type=str)
+
+parser.add_argument('-warmup_ratio', action="store", dest="warmup_ratio", default = 0.1, type=float)
+
+parser.add_argument('-model_path', action="store", dest="model_path", default = "./models_cleaned/", type=str)
 parser.add_argument('-patience', action="store", dest="patience", default = 10, type=int)
-parser.add_argument('-learning_rate', action="store", dest="learning_rate", default = 1e-4, type=float)
+parser.add_argument('-learning_rate', action="store", dest="learning_rate", default = 2e-4, type=float)
 parser.add_argument('-group_texts', action="store", dest="group_texts", default = False, type=boolean_string)
 
 
@@ -61,9 +69,18 @@ else:
     p_exp_tag = ''
     
 p_use_valid_data = arguments.use_valid_data
+p_text_path = arguments.text_path
+
 print(p_use_valid_data)
 
+p_hidden_size = arguments.hidden_size
 p_num_hidden_layers = arguments.num_hidden_layers
+p_num_attention_heads = arguments.num_attention_heads
+p_intermediate_size = arguments.intermediate_size
+p_hidden_dropout_prob = arguments.hidden_dropout_prob
+p_attention_probs_dropout_prob = arguments.attention_probs_dropout_prob
+
+
 p_language = arguments.language
 p_corpus_name = arguments.corpus_name
 p_tok_name = arguments.tok_name
@@ -86,8 +103,8 @@ if not os.path.exists(p_save_path):
     os.makedirs(p_save_path+'/sp/')
 #    os.makedirs(p_save_path+'/converted/')
     
-train_path = './data_raw_txt/'+p_language+'/'+p_corpus_name+'_train_sample.txt'
-valid_path = './data_raw_txt/'+p_language+'/'+p_corpus_name+'_dev_sample.txt'
+train_path = p_text_path+p_language+'/'+p_corpus_name+'_train_sample.txt'
+valid_path = p_text_path+p_language+'/'+p_corpus_name+'_dev_sample.txt'
 
 print(p_save_path)
 
@@ -148,10 +165,15 @@ tokenizer.save_pretrained(p_save_path)
 config = XLMRobertaConfig(
     vocab_size=tokenizer.vocab_size,
     max_position_embeddings=514,
-    num_attention_heads=12,
-    num_hidden_layers=p_num_hidden_layers,
+    hidden_size = p_hidden_size, 
+    num_hidden_layers = p_num_hidden_layers, 
+    num_attention_heads = p_num_attention_heads, 
+    intermediate_size = p_intermediate_size,
+    attention_probs_dropout_prob = p_attention_probs_dropout_prob,
     type_vocab_size=1,
+    
 )
+
 
 model = XLMRobertaForMaskedLM(config)
 device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
@@ -281,6 +303,7 @@ if p_use_valid_data:
         save_only_model=True,
         learning_rate=p_learning_rate,
         warmup_ratio = p_warmup_ratio,
+        weight_decay = 0.01,
     )
 
     trainer = Trainer(
@@ -306,6 +329,7 @@ else:
         save_only_model=True,
         learning_rate=p_learning_rate,
         warmup_ratio = p_warmup_ratio,
+        weight_decay = 0.01,
     )
 
     trainer = Trainer(

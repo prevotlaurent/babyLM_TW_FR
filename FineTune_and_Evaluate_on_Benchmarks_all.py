@@ -372,16 +372,30 @@ def run_one_fold(task,fold,split_dataset,checkpoint,tokenizer,label_list,weighte
     if freeze_to > 0.0:        
 
         for name, param in model.named_parameters():
-            if 'embeddings' in name:
+            if 'embedding' in name:
                 param.requires_grad = False
-                print(name)  
+                print(name)
+            elif 'embed_tokens' in name:
+                param.requires_grad = False
+                print(name)                
     
         freeze_to_layer = int(round(model.config.num_hidden_layers*freeze_to))
         freeze_to_layer   
         
+        freeze_to_alpha = freeze_to_layer * 2
+        
         for layer in range(0,freeze_to_layer):
             for name, param in model.named_parameters():
                 if 'encoder.layer.' + str(layer) + '.' in name:
+                    param.requires_grad = False
+                    print(name)
+                elif 'layers.' + str(layer) + '.' in name:
+                    param.requires_grad = False
+                    print(name)
+
+        for alpha in range(0,freeze_to_alpha):
+            for name, param in model.named_parameters():
+                if 'alphas.' + str(alpha) in name:
                     param.requires_grad = False
                     print(name)
          
